@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "SecureTor Bridge",
+  "version": "1.0",
+  "description": "Secure one-click connection to Tor network without requiring Tor installation",
+  "permissions": [
+    "proxy",
+    "storage",
+    "webRequest",
+    "webRequestAuthProvider", 
+    "notifications",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SecureTor Bridge"
+  }
+}
