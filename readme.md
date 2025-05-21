@@ -2,57 +2,99 @@
 
 A Chrome extension designed to provide a **secure and straightforward** way to connect to the Tor network directly within your Chrome browser. This eliminates the need to use the separate Tor Browser for routing your internet traffic through Tor.
 
-**Important:** Please be aware that this project is currently in the **development stage**. This means it might have bugs, and its features and security are still being actively worked on. Use with caution and at your own discretion.
+![SecureTor Bridge Logo](icon.svg)
 
 ## What is Tor?
 
 Tor, which stands for "The Onion Router," is a free and open-source software that enables anonymous communication online. It works by directing your internet traffic through a volunteer overlay network consisting of more than six thousand relays. When you use Tor, your data is encrypted and passed through multiple servers (called "nodes" or "relays") around the world, making it very difficult for anyone to trace your online activity back to your computer. Each relay in the network only knows the IP address of the immediately preceding and following nodes, not the entire path. This multi-layered encryption and routing process is why it's often compared to an onion, with layers of security protecting your identity.
 
-## How This Extension Works
+## Features
 
-This Chrome extension, SecureTor Bridge, aims to simplify the process of connecting to the Tor network. Instead of needing to download and run the Tor Browser, this extension handles the connection in the background of your regular Chrome browser. Here's a breakdown of how it's intended to work:
-
-1.  **Bridge Connection:** The extension is designed to connect to the Tor network using **bridge relays**. Tor bridges are Tor relays that aren't publicly listed, making it harder for censors to block the Tor network. The extension likely has a built-in mechanism to either automatically fetch or use a pre-configured list of these bridge addresses.
-
-2.  **Background Service:** Once you click the "Connect" button, the extension will initiate a connection to one of these Tor bridge relays. This connection will likely be established in the background, allowing you to continue browsing in other tabs while your traffic in the current and potentially other tabs is routed through Tor.
-
-3.  **Proxy Configuration:** The core functionality of the extension involves configuring Chrome's proxy settings to route your web traffic through the established Tor connection. When connected, your Chrome browser will send its requests to a local proxy server managed by the extension, which in turn forwards the traffic through the Tor network.
-
-4.  **IP Address Verification:** To confirm that your connection is indeed going through Tor, the extension likely includes a feature to check your public IP address. After connecting, it will display the IP address of the Tor exit node – the last server in the Tor circuit before your traffic reaches its destination.
-
-5.  **Status and Control:** The extension provides a user interface (likely in the popup window when you click the extension icon) to display the current connection status (Connected/Disconnected) and allow you to easily toggle the Tor connection on or off with a single click.
-
-6.  **Settings and Security Features:** The settings panel offers additional options to enhance your privacy and security while using Tor through the extension:
-    * **Auto-connect on startup:** This feature would automatically establish a Tor connection each time you open Chrome.
-    * **Enforce security:** This setting likely injects scripts or modifies browser behavior to block privacy-invasive features like WebRTC (which can reveal your real IP address even when using a proxy) and potentially disable other scripts that could compromise your anonymity.
-    * **Refresh connection every:** This option allows you to periodically change the Tor circuit you are using, providing an extra layer of anonymity by making it harder to track your activity over longer periods.
-    * **Security alerts and warnings:** The extension might display notifications about potential security risks or connection issues.
+- **One-Click Connection**: Connect to the Tor network with a single click from your Chrome browser
+- **No Tor Browser Required**: Use Tor's privacy benefits without installing the full Tor Browser
+- **Enhanced Security Mode**: Block WebRTC leaks, scripts, and other browser fingerprinting techniques
+- **Automatic Circuit Refresh**: Periodically change your Tor circuit for improved anonymity
+- **Connection Monitoring**: Automatically detects and recovers from connection drops
+- **User-Friendly Interface**: Clean, intuitive UI with connection status indicators
 
 ## Installation
 
-1.  **Download the extension files:** Obtain the necessary files for the extension (which you have already provided: `background.js`, `manifest.json`, `popup.css`, `popup.html`, `popup.js`).
-2.  **Open Chrome Extensions:** In your Chrome browser, navigate to `chrome://extensions/` in the address bar and press Enter.
-3.  **Enable Developer Mode:** In the top right corner of the Extensions page, toggle the switch next to "Developer mode" to turn it on.
-4.  **Load Unpacked:** Once Developer mode is enabled, a new button labeled "Load unpacked" will appear in the top left corner. Click this button.
-5.  **Select Extension Directory:** A file selection dialog will appear. Navigate to the folder where you saved the extension files and select the entire directory. Click "Open" or "Select Folder."
+### From Chrome Web Store (Coming Soon)
+1. Visit the Chrome Web Store (link will be provided once published)
+2. Click "Add to Chrome"
+3. Confirm the installation when prompted
 
-The SecureTor Bridge extension should now be installed in your Chrome browser. You will see its icon in the Chrome toolbar (usually in the top right corner).
+### Manual Installation (Developer Mode)
+1. **Download the extension files** from this repository
+2. **Unzip the files** to a folder on your computer
+3. **Open Chrome Extensions**: 
+   - In your Chrome browser, navigate to `chrome://extensions/` in the address bar
+   - Or click on the three dots menu → More Tools → Extensions
+4. **Enable Developer Mode**: 
+   - Toggle the switch for "Developer mode" in the top right corner
+5. **Load Unpacked**: 
+   - Click the "Load unpacked" button that appears
+   - Navigate to the folder where you unzipped the extension files
+   - Click "Select Folder"
+6. The SecureTor Bridge extension should now be installed in your Chrome browser
 
 ## Usage
 
-1.  **Click the Extension Icon:** Click on the SecureTor Bridge icon in your Chrome toolbar. This will open the extension's popup window.
-2.  **Connect to Tor:** In the popup window, click the "Connect" button. The extension will then attempt to establish a connection to the Tor network via bridge relays.
-3.  **Monitor Connection Status:** The status displayed in the popup will change to "Connected" once a successful Tor connection is established. It will also likely display the IP address of the Tor exit node you are currently using.
-4.  **Disconnect from Tor:** To stop using Tor, simply click the "Disconnect" button in the popup window. Your browser will then revert to its regular internet connection.
-5.  **Access Settings:** Look for a "Settings" or "Options" button or link within the popup window. Clicking this will take you to a page where you can configure the extension's behavior, such as auto-connect, security settings, and the circuit refresh interval.
+1. **Click the Extension Icon**: Find the SecureTor Bridge icon in your Chrome toolbar
+2. **Connect to Tor**: Click the "Connect" button in the popup
+3. **Wait for Connection**: The extension will establish a secure connection to the Tor network
+4. **Verify Your IP**: Once connected, your new Tor IP address will be displayed
+5. **Disconnect When Done**: Click "Disconnect" when you no longer need the Tor connection
 
-## Security Notes
+## Settings
 
-* **Anonymity is not absolute:** While Tor provides a significant increase in anonymity, it's crucial to understand that it's not foolproof. Your online activity can still be potentially linked to you through various means, especially if you log into personal accounts or reveal identifying information while using Tor.
-* **Use HTTPS:** Always ensure you are visiting websites using HTTPS (the secure version of HTTP). This encrypts the communication between your browser and the website, protecting your data from eavesdropping on the Tor network.
-* **Be cautious with plugins:** Browser plugins like Flash and Java can potentially reveal your real IP address. It's generally recommended to disable or restrict the use of such plugins when using Tor. The "Enforce security" setting in this extension aims to mitigate some of these risks.
-* **Understand the development stage:** As this project is in development, its security and reliability are not yet fully established. Be aware of the potential risks involved in using pre-release software for security-sensitive tasks.
+Access settings by clicking the gear icon in the popup:
 
-## Credits
+- **Auto-connect on startup**: Automatically connect to Tor when Chrome starts
+- **Enforce security**: Enable additional protections against WebRTC leaks and fingerprinting
+- **Refresh connection**: Set an interval to automatically change your Tor circuit
 
-Created by DarkExploiter (VK)
+## Troubleshooting Connection Issues
+
+If you're having trouble connecting to the Tor network, try these solutions:
+
+### Connection Fails Immediately
+- **Check your internet connection**: Make sure you have a working internet connection
+- **Firewall or antivirus blocking**: Your security software might be blocking the connection
+- **Try a different bridge**: The extension automatically tries alternative bridges, but sometimes network conditions change
+- **Restart your browser**: Close Chrome completely and restart it
+
+### Connection Drops Frequently
+- **Network stability issues**: Unstable internet connections can affect Tor connectivity
+- **VPN conflicts**: If you're also using a VPN, it might interfere with the Tor connection
+- **ISP restrictions**: Some Internet Service Providers limit or block Tor connections
+
+### Slow Connection
+- **Expected behavior**: Tor connections are generally slower than direct connections due to the multiple relays
+- **Try at different times**: Tor network congestion varies throughout the day
+- **Circuit refresh**: Try manually disconnecting and reconnecting to get a new circuit
+
+## Security Considerations
+
+- **Not a complete replacement for Tor Browser**: While this extension routes traffic through Tor, the Tor Browser includes additional privacy features
+- **JavaScript vulnerabilities**: Even with security enforcement, JavaScript can potentially leak information
+- **Browser fingerprinting**: Chrome has a more unique fingerprint than Tor Browser
+- **Don't log into accounts**: Avoid using personal accounts while connected to Tor through this extension
+
+## Privacy Policy
+
+This extension:
+- Does not collect any personal information
+- Does not track your browsing history
+- Does not share any data with third parties
+- Only connects to official Tor bridges and verification services
+
+## Credits and License
+
+Created by vishux777 (GitHub)
+
+All rights reserved. For usage or modification permission, please contact: somethingdifferent561@gmail.com
+
+## Development Status
+
+This extension is currently in **development stage**. While it is functional, there may be bugs or security considerations still being addressed. Please report any issues you encounter.

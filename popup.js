@@ -16,6 +16,9 @@ document.addEventListener('DOMContentLoaded', function() {
   // Check current connection status on load
   checkConnectionStatus();
   
+  // Store real IP on load
+  storeRealIP();
+  
   // Load saved settings
   loadSettings();
 
@@ -26,9 +29,15 @@ document.addEventListener('DOMContentLoaded', function() {
   
   // Setup connection toggle button
   toggleButton.addEventListener('click', function() {
-    if (toggleButton.textContent === 'Connect') {
+    // Disable button while connecting/disconnecting
+    toggleButton.disabled = true;
+    toggleButton.textContent = toggleButton.textContent === 'Connect' ? 'Connecting...' : 'Disconnecting...';
+    
+    if (toggleButton.textContent === 'Connecting...') {
       // Send connect request to background script
       chrome.runtime.sendMessage({ action: 'connect' }, function(response) {
+        toggleButton.disabled = false;
+        
         if (response && response.success) {
           updateUIForConnectedState(response.ip);
         } else {
@@ -36,13 +45,18 @@ document.addEventListener('DOMContentLoaded', function() {
           const errorMsg = response?.error ? response.error : 'Connection failed';
           statusText.textContent = 'Connection Error';
           currentIp.textContent = errorMsg;
+          toggleButton.textContent = 'Connect';
         }
       });
     } else {
       // Send disconnect request to background script
       chrome.runtime.sendMessage({ action: 'disconnect' }, function(response) {
+        toggleButton.disabled = false;
+        
         if (response && response.success) {
           updateUIForDisconnectedState();
+        } else {
+          toggleButton.textContent = 'Disconnect';
         }
       });
     }
@@ -56,23 +70,37 @@ document.addEventListener('DOMContentLoaded', function() {
       circuitRefresh: circuitRefreshSelect.value
     };
     
+    saveSettingsButton.textContent = 'Saving...';
+    saveSettingsButton.disabled = true;
+    
     chrome.runtime.sendMessage({ 
       action: 'updateSettings',
       settings: settings
     }, function(response) {
+      saveSettingsButton.disabled = false;
+      
       if (response && response.success) {
         // Show saved indicator
-        const originalText = saveSettingsButton.textContent;
         saveSettingsButton.textContent = 'Saved!';
         setTimeout(() => {
-          saveSettingsButton.textContent = originalText;
+          saveSettingsButton.textContent = 'Save Settings';
         }, 1500);
         
         // Update security warning based on settings
         updateSecurityWarning(settings.enforceSecurity);
+      } else {
+        saveSettingsButton.textContent = 'Error - Try Again';
+        setTimeout(() => {
+          saveSettingsButton.textContent = 'Save Settings';
+        }, 1500);
       }
     });
   });
+  
+  // Store user's real IP
+  function storeRealIP() {
+    chrome.runtime.sendMessage({ action: 'checkRealIP' });
+  }
   
   // Function to check current connection status
   function checkConnectionStatus() {
@@ -80,6 +108,16 @@ document.addEventListener('DOMContentLoaded', function() {
       if (response && response.connectionActive) {
         // We're connected, update UI and get IP
         updateUIForConnectedState();
+        
+        // Handle connection states
+        if (response.connectionState === "attempting") {
+          statusText.textContent = 'Connecting...';
+          currentIp.textContent = 'Establishing connection...';
+        } else if (response.connectionState === "retrying") {
+          statusText.textContent = 'Retrying...';
+          currentIp.textContent = 'Trying alternative route...';
+        }
+        
         // Check IP in a separate call
         chrome.runtime.sendMessage({ action: 'checkIP' }, function(ipResponse) {
           if (ipResponse && ipResponse.connected) {
@@ -117,6 +155,7 @@ document.addEventListener('DOMContentLoaded', function() {
     statusText.textContent = 'Connected';
     toggleButton.textContent = 'Disconnect';
     toggleButton.classList.add('disconnect');
+    toggleButton.disabled = false;
     
     if (ip) {
       currentIp.textContent = ip;
@@ -131,6 +170,7 @@ document.addEventListener('DOMContentLoaded', function() {
     statusText.textContent = 'Disconnected';
     toggleButton.textContent = 'Connect';
     toggleButton.classList.remove('disconnect');
+    toggleButton.disabled = false;
     currentIp.textContent = 'Not Protected';
     
     // Check the real IP to show the user what's exposed
@@ -139,14 +179,22 @@ document.addEventListener('DOMContentLoaded', function() {
   
   // Function to check real IP when disconnected
   function checkRealIP() {
-    fetch('https://api.ipify.org?format=json')
-      .then(response => response.json())
-      .then(data => {
-        currentIp.textContent = data.ip || 'Unknown';
-      })
-      .catch(error => {
-        currentIp.textContent = 'Unable to determine';
-      });
+    chrome.storage.local.get(['realIP'], function(result) {
+      if (result.realIP) {
+        currentIp.textContent = result.realIP;
+      } else {
+        // If we don't have a stored real IP, fetch it
+        fetch('https://api.ipify.org?format=json')
+          .then(response => response.json())
+          .then(data => {
+            currentIp.textContent = data.ip || 'Unknown';
+            chrome.storage.local.set({ realIP: data.ip });
+          })
+          .catch(error => {
+            currentIp.textContent = 'Unable to determine';
+          });
+      }
+    });
   }
   
   // Function to update security warning message
@@ -154,6 +202,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (enforceSecurityEnabled) {
       securityAlert.querySelector('.alert-message').textContent = 
         'For maximum privacy, avoid signing into accounts or sharing personal data.';
+      securityAlert.style.backgroundColor = 'rgba(229, 57, 53, 0.15)';
     } else {
       securityAlert.querySelector('.alert-message').textContent = 
         'WARNING: Enhanced security is disabled. Your browser may leak identifying information.';
@@ -161,6 +210,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
   
-  // Refresh connection status every 15 seconds
-  setInterval(checkConnectionStatus, 15000);
+  // Refresh connection status every 5 seconds
+  setInterval(checkConnectionStatus, 5000);
 });
