@@ -1,156 +1,207 @@
-// This content script runs when security enforcement is enabled
-// It blocks WebRTC and other potential privacy leaks
+// Simplified security content script
+// Only runs when security enforcement is enabled
 
 (() => {
-  console.log("SecureTor Bridge: Enforcing security measures");
+  'use strict';
   
-  // Block WebRTC (prevents IP leaks)
+  // Prevent multiple injections
+  if (window._secureTorBridgeActive) {
+    return;
+  }
+  window._secureTorBridgeActive = true;
+  
+  console.log("SecureTor Bridge: Security enforcement active");
+  
+  // Block WebRTC to prevent IP leaks
   function blockWebRTC() {
-    // Override WebRTC methods
-    try {
-      // Disable RTCPeerConnection
-      if (window.RTCPeerConnection) {
-        window.RTCPeerConnection = function() {
+    const rtcMethods = [
+      'RTCPeerConnection',
+      'webkitRTCPeerConnection', 
+      'mozRTCPeerConnection'
+    ];
+    
+    rtcMethods.forEach(method => {
+      if (window[method]) {
+        const original = window[method];
+        window[method] = function() {
           console.log("SecureTor Bridge: Blocked WebRTC connection attempt");
-          throw new Error("WebRTC is disabled for your privacy");
+          throw new Error("WebRTC disabled for privacy protection");
         };
+        // Hide that we've overridden it
+        try {
+          Object.defineProperty(window[method], 'toString', {
+            value: () => original.toString()
+          });
+        } catch (e) {}
       }
-      
-      // Disable deprecated webkitRTCPeerConnection
-      if (window.webkitRTCPeerConnection) {
-        window.webkitRTCPeerConnection = function() {
-          console.log("SecureTor Bridge: Blocked WebRTC connection attempt");
-          throw new Error("WebRTC is disabled for your privacy");
-        };
-      }
-      
-      // Disable mozRTCPeerConnection
-      if (window.mozRTCPeerConnection) {
-        window.mozRTCPeerConnection = function() {
-          console.log("SecureTor Bridge: Blocked WebRTC connection attempt");
-          throw new Error("WebRTC is disabled for your privacy");
-        };
-      }
-      
-      console.log("SecureTor Bridge: WebRTC blocking enabled");
-    } catch (e) {
-      console.error("SecureTor Bridge: Failed to block WebRTC", e);
-    }
+    });
   }
   
-  // Block navigator geolocation
+  // Block geolocation API
   function blockGeolocation() {
-    try {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition = function(success, error) {
+    if (navigator.geolocation) {
+      const blocked = {
+        getCurrentPosition: function(success, error) {
+          console.log("SecureTor Bridge: Blocked geolocation request");
           if (error) {
-            error({ code: 1, message: "Geolocation is disabled for your privacy" });
+            error({
+              code: 1,
+              message: "Geolocation blocked for privacy",
+              PERMISSION_DENIED: 1
+            });
           }
-          return undefined;
-        };
+        },
         
-        navigator.geolocation.watchPosition = function(success, error) {
+        watchPosition: function(success, error) {
+          console.log("SecureTor Bridge: Blocked geolocation watchPosition");
           if (error) {
-            error({ code: 1, message: "Geolocation is disabled for your privacy" });
+            error({
+              code: 1, 
+              message: "Geolocation blocked for privacy",
+              PERMISSION_DENIED: 1
+            });
           }
           return 0;
-        };
+        },
         
-        console.log("SecureTor Bridge: Geolocation blocking enabled");
+        clearWatch: function() {}
+      };
+      
+      try {
+        Object.defineProperty(navigator, 'geolocation', {
+          value: blocked,
+          writable: false,
+          configurable: false
+        });
+      } catch (e) {
+        // Fallback - override individual methods
+        navigator.geolocation.getCurrentPosition = blocked.getCurrentPosition;
+        navigator.geolocation.watchPosition = blocked.watchPosition;
       }
-    } catch (e) {
-      console.error("SecureTor Bridge: Failed to block geolocation", e);
     }
   }
   
-  // Disable some device information APIs
-  function blockDeviceInfo() {
+  // Basic fingerprinting protection
+  function reduceFingerprinting() {
+    // Generic user agent (common one)
+    const genericUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+    
     try {
-      // Modify navigator.userAgent
-      const spoofedUserAgent = "Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0";
-      
-      // Override properties in a way that doesn't break sites completely
-      const originalUserAgent = navigator.userAgent;
       Object.defineProperty(navigator, 'userAgent', {
-        get: function() {
-          return spoofedUserAgent;
-        }
+        get: () => genericUA,
+        configurable: false
       });
-      
-      console.log("SecureTor Bridge: Device info protection enabled");
     } catch (e) {
-      console.error("SecureTor Bridge: Failed to block device info", e);
+      console.log("SecureTor Bridge: Could not modify user agent");
     }
-  }
-  
-  // Block document.referrer
-  function blockReferrer() {
+    
+    // Clear referrer
     try {
       Object.defineProperty(document, 'referrer', {
-        get: function() {
-          return "";
-        }
+        get: () => "",
+        configurable: false
       });
-      console.log("SecureTor Bridge: Referrer blocking enabled");
     } catch (e) {
-      console.error("SecureTor Bridge: Failed to block referrer", e);
+      console.log("SecureTor Bridge: Could not clear referrer");
+    }
+    
+    // Block some battery API if it exists
+    if (navigator.getBattery) {
+      navigator.getBattery = function() {
+        return Promise.reject(new Error("Battery API blocked for privacy"));
+      };
     }
   }
   
-  // Execute all blocking functions
-  blockWebRTC();
-  blockGeolocation();
-  blockDeviceInfo();
-  blockReferrer();
-  
-  // Notify user that protections are active
-  function addPrivacyNotice() {
-    try {
-      // Create a small notification element
-      const notice = document.createElement('div');
-      notice.style.position = 'fixed';
-      notice.style.bottom = '10px';
-      notice.style.right = '10px';
-      notice.style.backgroundColor = 'rgba(155, 89, 255, 0.8)';
-      notice.style.color = 'white';
-      notice.style.padding = '8px 12px';
-      notice.style.borderRadius = '4px';
-      notice.style.fontSize = '12px';
-      notice.style.zIndex = '9999';
-      notice.style.fontFamily = 'Arial, sans-serif';
-      notice.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
-      notice.textContent = '🔒 SecureTor: Enhanced privacy active';
-      notice.style.cursor = 'pointer';
-      
-      // Make it fade out after 5 seconds
-      notice.style.transition = 'opacity 1s ease-in-out';
-      
-      // Add it to the page
-      document.body.appendChild(notice);
-      
-      // Allow user to dismiss by clicking
-      notice.addEventListener('click', function() {
-        document.body.removeChild(notice);
-      });
-      
-      // Auto-hide after 5 seconds
+  // Show privacy notice
+  function showPrivacyNotice() {
+    // Check if notice already exists
+    if (document.getElementById('securetor-privacy-notice')) {
+      return;
+    }
+    
+    const notice = document.createElement('div');
+    notice.id = 'securetor-privacy-notice';
+    notice.style.cssText = `
+      position: fixed !important;
+      top: 10px !important;
+      right: 10px !important;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+      color: white !important;
+      padding: 8px 12px !important;
+      border-radius: 6px !important;
+      font-size: 12px !important;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+      z-index: 2147483647 !important;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+      cursor: pointer !important;
+      transition: all 0.3s ease !important;
+      max-width: 200px !important;
+      text-align: center !important;
+      user-select: none !important;
+    `;
+    
+    notice.innerHTML = '🛡️ Privacy Protection Active';
+    
+    // Add hover effect
+    notice.addEventListener('mouseenter', () => {
+      notice.style.transform = 'scale(1.05)';
+    });
+    
+    notice.addEventListener('mouseleave', () => {
+      notice.style.transform = 'scale(1)';
+    });
+    
+    // Click to dismiss
+    notice.addEventListener('click', () => {
+      notice.style.opacity = '0';
       setTimeout(() => {
+        if (notice.parentNode) {
+          notice.remove();
+        }
+      }, 300);
+    });
+    
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+      if (notice.parentNode) {
         notice.style.opacity = '0';
         setTimeout(() => {
-          if (document.body.contains(notice)) {
-            document.body.removeChild(notice);
+          if (notice.parentNode) {
+            notice.remove();
           }
-        }, 1000);
-      }, 5000);
-    } catch (e) {
-      console.error("SecureTor Bridge: Failed to add privacy notice", e);
+        }, 300);
+      }
+    }, 5000);
+    
+    // Add to page when ready
+    function addNotice() {
+      if (document.body) {
+        document.body.appendChild(notice);
+      } else {
+        setTimeout(addNotice, 100);
+      }
     }
+    
+    addNotice();
   }
   
-  // Wait for DOM to be ready before adding notice
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', addPrivacyNotice);
-  } else {
-    addPrivacyNotice();
+  // Apply all security measures
+  try {
+    blockWebRTC();
+    blockGeolocation();
+    reduceFingerprinting();
+    
+    // Show notice when page is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', showPrivacyNotice);
+    } else {
+      showPrivacyNotice();
+    }
+    
+    console.log("SecureTor Bridge: All security measures applied");
+  } catch (error) {
+    console.error("SecureTor Bridge: Error applying security measures:", error);
   }
+  
 })();

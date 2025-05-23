@@ -1,13 +1,11 @@
 {
   "manifest_version": 3,
   "name": "SecureTor Bridge",
-  "version": "1.0.1",
-  "description": "Secure one-click connection to Tor network without requiring Tor installation",
+  "version": "2.0.0",
+  "description": "Secure proxy connection with enhanced privacy features",
   "permissions": [
     "proxy",
     "storage",
-    "webRequest",
-    "webRequestAuthProvider", 
     "notifications",
     "tabs",
     "scripting"
@@ -20,29 +18,11 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "SecureTor Bridge",
-    "default_icon": {
-      "16": "icons/icon16.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
-    }
+    "default_title": "SecureTor Bridge"
   },
   "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["enforce_security.js"],
-      "run_at": "document_start"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["icons/*"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
 }

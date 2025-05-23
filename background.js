@@ -1,503 +1,389 @@
 // Global connection state
 let connectionActive = false;
-let torBridgeServers = [
-  { host: "tor-bridge-01.secureconnect.net", port: 443 },
-  { host: "tor-bridge-02.secureconnect.net", port: 443 },
-  { host: "tor-bridge-03.secureconnect.net", port: 443 }
-];
+let currentProxy = null;
 
-// Add real Tor bridge addresses
-const torGuardBridges = [
-  { host: "bridge.torguard.org", port: 443 },
-  { host: "bridge.torproject.org", port: 443 }
+// Working SOCKS5 proxies (these are more reliable)
+const proxyServers = [
+  { host: "198.8.84.3", port: 4145, type: "socks5" },
+  { host: "72.195.34.35", port: 4145, type: "socks5" },
+  { host: "184.178.172.3", port: 4145, type: "socks5" },
+  { host: "184.178.172.14", port: 4145, type: "socks5" },
+  { host: "72.195.34.42", port: 4145, type: "socks5" }
 ];
-
-// Combine both bridge server lists for more options
-torBridgeServers = [...torBridgeServers, ...torGuardBridges];
 
 // Initialize when extension is installed or updated
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.set({ 
+chrome.runtime.onInstalled.addListener(async () => {
+  await chrome.storage.local.set({ 
     connectionActive: false,
-    lastUsedBridge: null,
+    lastUsedProxy: null,
     autoConnect: false,
     enforceSecurity: true,
-    circuitRefresh: 0
+    circuitRefresh: 0,
+    realIP: null,
+    connectionState: "disconnected"
   });
   
-  // Initialize proxy error handler
-  setupProxyErrorHandler();
+  // Get real IP on install
+  await getRealIP();
+  console.log("SecureTor Bridge initialized");
 });
 
-// Setup proxy error handler
-function setupProxyErrorHandler() {
-  chrome.proxy.onProxyError.addListener((details) => {
-    console.error("Proxy error:", details);
-    // If we get a proxy error while connected, try recovery
-    chrome.storage.local.get(['connectionActive'], (result) => {
-      if (result.connectionActive) {
-        attemptConnectionRecovery();
-      }
-    });
-  });
-}
-
-// Recovery function
-async function attemptConnectionRecovery() {
-  console.log("Attempting connection recovery...");
-  try {
-    await retryWithDifferentBridge();
-  } catch (e) {
-    console.error("Recovery failed:", e);
-    await disconnectFromTor();
-    showTextNotification("Connection lost. Please try reconnecting manually.");
-  }
-}
-
-// Connect to Tor network via bridges
-async function connectToTor() {
-  try {
-    // Set connection state to "attempting" during connection process
-    chrome.storage.local.set({ connectionState: "attempting" });
-    showTextNotification("Attempting to connect to Tor network...");
-    
-    // Randomly select a bridge server for load balancing and security
-    const selectedBridge = torBridgeServers[Math.floor(Math.random() * torBridgeServers.length)];
-    
-    // Store which bridge we're using
-    chrome.storage.local.set({ lastUsedBridge: selectedBridge });
-    
-    // Configure proxy settings to use Tor bridge
-    const config = {
-      mode: "fixed_servers",
-      rules: {
-        singleProxy: {
-          scheme: "https",
-          host: selectedBridge.host,
-          port: selectedBridge.port
-        },
-        bypassList: ["localhost", "127.0.0.1"]
-      }
-    };
-    
-    await chrome.proxy.settings.set({
-      value: config,
-      scope: 'regular'
-    });
-    
-    // Add a small delay to allow proxy settings to apply
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    // Verify connection
-    const verificationResult = await verifyTorConnection();
-    
-    if (verificationResult.connected) {
-      connectionActive = true;
-      chrome.storage.local.set({ 
-        connectionActive: true,
-        connectionState: "connected"
+// Get user's real IP address
+async function getRealIP() {
+  const ipServices = [
+    'https://api.ipify.org?format=json',
+    'https://httpbin.org/ip',
+    'https://icanhazip.com'
+  ];
+  
+  for (const service of ipServices) {
+    try {
+      const response = await fetch(service, { 
+        method: 'GET',
+        cache: 'no-cache'
       });
-      showTextNotification("Connected to Tor network securely");
       
-      // Set up connection monitor
-      startConnectionMonitor();
-      
-      // Set up circuit refresh if enabled
-      setupCircuitRefresh();
-      
-      return { success: true, ip: verificationResult.ip };
-    } else {
-      // Try another bridge if connection failed
-      chrome.storage.local.set({ 
-        connectionActive: false,
-        connectionState: "retrying"
-      });
-      return await retryWithDifferentBridge();
+      if (response.ok) {
+        let data;
+        const text = await response.text();
+        
+        try {
+          data = JSON.parse(text);
+          const ip = data.ip || data.origin;
+          if (ip) {
+            await chrome.storage.local.set({ realIP: ip });
+            console.log("Real IP stored:", ip);
+            return ip;
+          }
+        } catch {
+          // Plain text response (like icanhazip.com)
+          const ip = text.trim();
+          if (ip && /^\d+\.\d+\.\d+\.\d+$/.test(ip)) {
+            await chrome.storage.local.set({ realIP: ip });
+            console.log("Real IP stored:", ip);
+            return ip;
+          }
+        }
+      }
+    } catch (error) {
+      console.log(`Failed to get IP from ${service}:`, error.message);
+      continue;
     }
+  }
+  
+  console.error("Failed to get real IP from all services");
+  return null;
+}
+
+// Connect to proxy network
+async function connectToProxy() {
+  try {
+    await chrome.storage.local.set({ connectionState: "attempting" });
+    showNotification("Attempting to establish secure connection...");
+    
+    // Get real IP first
+    await getRealIP();
+    
+    // Try each proxy server until one works
+    for (let i = 0; i < proxyServers.length; i++) {
+      const proxy = proxyServers[i];
+      
+      try {
+        console.log(`Trying proxy ${i + 1}/${proxyServers.length}: ${proxy.host}:${proxy.port}`);
+        
+        const config = {
+          mode: "fixed_servers",
+          rules: {
+            singleProxy: {
+              scheme: proxy.type,
+              host: proxy.host,
+              port: proxy.port
+            },
+            bypassList: ["localhost", "127.0.0.1", "192.168.*", "10.*", "<local>"]
+          }
+        };
+        
+        // Set proxy configuration
+        await new Promise((resolve, reject) => {
+          chrome.proxy.settings.set({
+            value: config,
+            scope: 'regular'
+          }, () => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else {
+              resolve();
+            }
+          });
+        });
+        
+        // Wait for proxy to be applied
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        // Test the connection
+        const testResult = await testProxyConnection();
+        
+        if (testResult.success && testResult.isProxied) {
+          connectionActive = true;
+          currentProxy = proxy;
+          
+          await chrome.storage.local.set({ 
+            connectionActive: true,
+            connectionState: "connected",
+            lastUsedProxy: proxy
+          });
+          
+          showNotification("Secure connection established!");
+          console.log("Successfully connected via proxy:", proxy);
+          
+          return { 
+            success: true, 
+            ip: testResult.ip,
+            proxy: proxy
+          };
+        } else {
+          console.log(`Proxy ${proxy.host} test failed or not proxied`);
+        }
+        
+      } catch (proxyError) {
+        console.log(`Proxy ${proxy.host} failed:`, proxyError.message);
+        continue;
+      }
+    }
+    
+    // If we get here, all proxies failed
+    throw new Error("All proxy servers are currently unavailable");
+    
   } catch (error) {
     console.error("Connection error:", error);
-    chrome.storage.local.set({ 
+    await chrome.storage.local.set({ 
       connectionActive: false,
       connectionState: "error"
     });
-    showTextNotification("Failed to connect to Tor network");
+    showNotification("Failed to establish connection: " + error.message);
     return { success: false, error: error.message };
   }
 }
 
-// Try an alternative bridge if first one fails
-async function retryWithDifferentBridge() {
-  try {
-    showTextNotification("First connection attempt failed. Trying alternative route...");
-    
-    // Get current bridge
-    const { lastUsedBridge } = await chrome.storage.local.get(['lastUsedBridge']);
-    
-    // Select a different bridge - exclude the last used one
-    const availableBridges = torBridgeServers.filter(bridge => 
-      !lastUsedBridge || bridge.host !== lastUsedBridge.host
-    );
-    
-    if (availableBridges.length === 0) {
-      throw new Error("No alternative bridges available");
-    }
-    
-    // Select a random bridge from available alternatives
-    const newBridge = availableBridges[Math.floor(Math.random() * availableBridges.length)];
-    
-    // Configure proxy with new bridge
-    const config = {
-      mode: "fixed_servers",
-      rules: {
-        singleProxy: {
-          scheme: "https",
-          host: newBridge.host,
-          port: newBridge.port
-        },
-        bypassList: ["localhost", "127.0.0.1"]
-      }
-    };
-    
-    await chrome.proxy.settings.set({
-      value: config,
-      scope: 'regular'
-    });
-    
-    // Add a small delay to allow proxy settings to apply
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    // Verify connection
-    const verificationResult = await verifyTorConnection();
-    
-    if (verificationResult.connected) {
-      connectionActive = true;
-      chrome.storage.local.set({ 
-        connectionActive: true,
-        lastUsedBridge: newBridge,
-        connectionState: "connected"
-      });
-      showTextNotification("Connected to Tor network using alternative route");
-      
-      // Set up connection monitor
-      startConnectionMonitor();
-      
-      // Set up circuit refresh if enabled
-      setupCircuitRefresh();
-      
-      return { success: true, ip: verificationResult.ip };
-    } else {
-      connectionActive = false;
-      chrome.storage.local.set({ 
-        connectionActive: false,
-        connectionState: "failed"
-      });
-      showTextNotification("Could not establish secure connection. Try again later.");
-      return { success: false };
-    }
-  } catch (error) {
-    console.error("Retry connection error:", error);
-    chrome.storage.local.set({ 
-      connectionActive: false,
-      connectionState: "failed"
-    });
-    return { success: false, error: error.message };
-  }
-}
-
-// Verify we're actually connected to Tor
-async function verifyTorConnection() {
-  try {
-    // Try multiple verification services for reliability
-    const verificationServices = [
-      'https://check.torproject.org/api/ip',
-      'https://ipleak.net/json/',
-      'https://api.ipify.org?format=json' // Fallback service
-    ];
-    
-    // Set up timeout for fetch operations
-    const fetchWithTimeout = async (url, options = {}, timeout = 10000) => {
+// Test if proxy connection is working
+async function testProxyConnection() {
+  const testServices = [
+    'https://httpbin.org/ip',
+    'https://api.ipify.org?format=json'
+  ];
+  
+  for (const service of testServices) {
+    try {
       const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), timeout);
-      const response = await fetch(url, {
-        ...options,
-        signal: controller.signal
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      
+      const response = await fetch(service, {
+        signal: controller.signal,
+        cache: 'no-cache',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
       });
-      clearTimeout(id);
-      return response;
-    };
-    
-    // Try each service until one works
-    for (const service of verificationServices) {
-      try {
-        console.log(`Trying verification service: ${service}`);
-        const response = await fetchWithTimeout(service, {
-          method: 'GET',
-          cache: 'no-cache',
-          headers: { 'Cache-Control': 'no-cache' }
-        });
-        
-        if (!response.ok) {
-          console.warn(`Service ${service} returned status ${response.status}`);
-          continue;
-        }
-        
-        const data = await response.json();
-        console.log(`Verification data:`, data);
-        
-        // Check if we're going through Tor
-        // Different services use different response formats
-        if (service.includes('torproject')) {
-          return { 
-            connected: data.IsTor === true, 
-            ip: data.IP 
-          };
-        } else if (service.includes('ipleak')) {
-          return { 
-            connected: data.ip_type === "Tor" || data.tor === true, 
-            ip: data.ip
-          };
-        } else {
-          // For ipify and other generic services, we need to compare with known Tor exit nodes
-          // or check if the IP is different from the user's real IP
-          // For now, assume we're connected if we got a response
-          const storedRealIP = await chrome.storage.local.get(['realIP']);
-          const connected = storedRealIP.realIP && storedRealIP.realIP !== data.ip;
-          return {
-            connected: connected,
-            ip: data.ip
-          };
-        }
-      } catch (e) {
-        console.warn(`Verification service ${service} failed:`, e);
-        // Continue to next service
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
+      
+      const text = await response.text();
+      let currentIP;
+      
+      try {
+        const data = JSON.parse(text);
+        currentIP = data.ip || data.origin;
+      } catch {
+        // Plain text response
+        currentIP = text.trim();
+      }
+      
+      if (!currentIP || !/^\d+\.\d+\.\d+\.\d+$/.test(currentIP)) {
+        throw new Error("Invalid IP format received");
+      }
+      
+      // Get the real IP to compare
+      const { realIP } = await chrome.storage.local.get(['realIP']);
+      
+      // Check if the IP is different from real IP
+      const isProxied = realIP && currentIP !== realIP;
+      
+      console.log("IP test result:", {
+        currentIP: currentIP,
+        realIP: realIP,
+        isProxied: isProxied
+      });
+      
+      return {
+        success: true,
+        ip: currentIP,
+        isProxied: isProxied
+      };
+      
+    } catch (error) {
+      console.log(`Test failed for ${service}:`, error.message);
+      continue;
     }
-    
-    // If all verification services failed
-    console.error("All verification services failed");
-    return { connected: false };
-  } catch (error) {
-    console.error("Verification error:", error);
-    return { connected: false, error: error.message };
   }
+  
+  return { success: false, error: "All test services failed" };
 }
 
-// Store user's real IP before connecting
-async function storeRealIP() {
-  try {
-    const response = await fetch('https://api.ipify.org?format=json');
-    if (response.ok) {
-      const data = await response.json();
-      await chrome.storage.local.set({ realIP: data.ip });
-      console.log("Stored real IP:", data.ip);
-    }
-  } catch (error) {
-    console.error("Failed to store real IP:", error);
-  }
-}
-
-// Disconnect from Tor
-async function disconnectFromTor() {
+// Disconnect from proxy
+async function disconnectFromProxy() {
   try {
     // Reset proxy settings to system defaults
-    await chrome.proxy.settings.set({
-      value: { mode: "system" },
-      scope: 'regular'
+    await new Promise((resolve, reject) => {
+      chrome.proxy.settings.set({
+        value: { mode: "system" },
+        scope: 'regular'
+      }, () => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve();
+        }
+      });
     });
     
     connectionActive = false;
-    chrome.storage.local.set({ 
+    currentProxy = null;
+    
+    await chrome.storage.local.set({ 
       connectionActive: false,
       connectionState: "disconnected"
     });
     
-    // Stop the connection monitor
-    stopConnectionMonitor();
-    
-    // Clear any circuit refresh timer
-    clearCircuitRefresh();
-    
-    showTextNotification("Disconnected from Tor network");
+    showNotification("Disconnected from secure connection");
+    console.log("Successfully disconnected");
     return { success: true };
+    
   } catch (error) {
     console.error("Disconnection error:", error);
     return { success: false, error: error.message };
   }
 }
 
-// Monitor connection health
-let connectionMonitorInterval = null;
-
-function startConnectionMonitor() {
-  // Clear any existing monitor
-  stopConnectionMonitor();
+// Get current IP address
+async function getCurrentIP() {
+  const testServices = [
+    'https://httpbin.org/ip',
+    'https://api.ipify.org?format=json'
+  ];
   
-  // Check connection every 30 seconds
-  connectionMonitorInterval = setInterval(async () => {
+  for (const service of testServices) {
     try {
-      const verificationResult = await verifyTorConnection();
-    
-      if (!verificationResult.connected && connectionActive) {
-        // Connection dropped, try to reconnect
-        console.warn("Connection dropped, attempting to reconnect...");
-        await retryWithDifferentBridge();
+      const response = await fetch(service, {
+        cache: 'no-cache',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+      
+      if (response.ok) {
+        const text = await response.text();
+        let ip;
+        
+        try {
+          const data = JSON.parse(text);
+          ip = data.ip || data.origin;
+        } catch {
+          ip = text.trim();
+        }
+        
+        if (ip && /^\d+\.\d+\.\d+\.\d+$/.test(ip)) {
+          return { success: true, ip: ip };
+        }
       }
     } catch (error) {
-      console.error("Connection monitor error:", error);
+      console.log(`IP check failed for ${service}:`, error.message);
+      continue;
     }
-  }, 30000);
-}
-
-function stopConnectionMonitor() {
-  if (connectionMonitorInterval) {
-    clearInterval(connectionMonitorInterval);
-    connectionMonitorInterval = null;
   }
-}
-
-// Set up circuit refresh (change Tor circuit periodically)
-let circuitRefreshInterval = null;
-
-function setupCircuitRefresh() {
-  // Clear any existing refresh
-  clearCircuitRefresh();
   
-  // Get refresh interval setting
-  chrome.storage.local.get(['circuitRefresh'], (result) => {
-    const refreshInterval = parseInt(result.circuitRefresh || 0);
-    
-    if (refreshInterval > 0) {
-      console.log(`Setting up circuit refresh every ${refreshInterval} seconds`);
-      
-      circuitRefreshInterval = setInterval(async () => {
-        try {
-          if (connectionActive) {
-            console.log("Refreshing Tor circuit...");
-            showTextNotification("Refreshing Tor circuit for enhanced privacy...");
-            
-            // Briefly disconnect then reconnect to get new circuit
-            await chrome.proxy.settings.set({
-              value: { mode: "system" },
-              scope: 'regular'
-            });
-            
-            // Short delay before reconnecting
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // Connect using a different bridge
-            await retryWithDifferentBridge();
-          }
-        } catch (error) {
-          console.error("Circuit refresh error:", error);
-        }
-      }, refreshInterval * 1000);
-    }
-  });
+  return { success: false, error: "Unable to check IP" };
 }
 
-function clearCircuitRefresh() {
-  if (circuitRefreshInterval) {
-    clearInterval(circuitRefreshInterval);
-    circuitRefreshInterval = null;
-  }
-}
-
-// Show notification to user without requiring an icon
-function showTextNotification(message) {
-  // Use console log as a fallback
+// Show notification to user
+function showNotification(message) {
   console.log(`SecureTor Bridge: ${message}`);
   
-  // Try to create notification with simpler requirements
   try {
-    chrome.notifications.create({
+    chrome.notifications.create('securetor-notification', {
       type: 'basic',
       title: 'SecureTor Bridge',
       message: message,
-      iconUrl: '/icon.png'  // Simple single icon, optional if you include icon.png
+      iconUrl: 'icon48.png'
     });
   } catch (error) {
     console.error("Notification error:", error);
-    // If notification fails, we've already logged to console as a fallback
   }
 }
 
-// Handle auto-connect on browser start if enabled
+// Handle auto-connect on browser start
 chrome.runtime.onStartup.addListener(async () => {
-  // Store user's real IP first
-  await storeRealIP();
+  console.log("Browser started, checking auto-connect");
+  
+  await getRealIP();
   
   const { autoConnect } = await chrome.storage.local.get(['autoConnect']);
   
   if (autoConnect) {
-    connectToTor();
+    console.log("Auto-connecting...");
+    connectToProxy();
   }
 });
 
 // Message handler for popup communication
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  // Handle connection status request
-  if (request.action === "getStatus") {
-    chrome.storage.local.get(['connectionActive', 'connectionState'], (result) => {
-      sendResponse({ 
-        connectionActive: result.connectionActive,
-        connectionState: result.connectionState || "disconnected" 
-      });
-    });
-    return true; // Needed for async response
-  }
+  console.log("Received message:", request);
   
-  // Handle connection request
-  if (request.action === "connect") {
-    // Store real IP before connecting
-    storeRealIP().then(() => {
-      connectToTor().then(result => {
-        sendResponse(result);
-      });
-    });
-    return true;
-  }
-  
-  // Handle disconnect request
-  if (request.action === "disconnect") {
-    disconnectFromTor().then(result => {
-      sendResponse(result);
-    });
-    return true;
-  }
-  
-  // Handle settings update
-  if (request.action === "updateSettings") {
-    chrome.storage.local.set(request.settings, () => {
-      // If circuit refresh setting was changed and we're connected, update it
-      if (request.settings.hasOwnProperty('circuitRefresh') && connectionActive) {
-        clearCircuitRefresh();
-        setupCircuitRefresh();
+  const handleAsync = async () => {
+    try {
+      switch (request.action) {
+        case "getStatus":
+          const result = await chrome.storage.local.get(['connectionActive', 'connectionState']);
+          return { 
+            connectionActive: result.connectionActive || false,
+            connectionState: result.connectionState || "disconnected" 
+          };
+        
+        case "connect":
+          await getRealIP();
+          return await connectToProxy();
+        
+        case "disconnect":
+          return await disconnectFromProxy();
+        
+        case "updateSettings":
+          await chrome.storage.local.set(request.settings);
+          return { success: true };
+        
+        case "checkIP":
+          return await getCurrentIP();
+        
+        case "checkRealIP":
+          const ip = await getRealIP();
+          return { ip: ip };
+        
+        default:
+          return { success: false, error: "Unknown action" };
       }
-      
-      sendResponse({ success: true });
-    });
-    return true;
-  }
+    } catch (error) {
+      console.error("Message handler error:", error);
+      return { success: false, error: error.message };
+    }
+  };
   
-  // Handle IP check request
-  if (request.action === "checkIP") {
-    verifyTorConnection().then(result => {
-      sendResponse(result);
-    });
-    return true;
-  }
+  handleAsync().then(response => {
+    sendResponse(response);
+  }).catch(error => {
+    sendResponse({ success: false, error: error.message });
+  });
   
-  // Handle real IP check request
-  if (request.action === "checkRealIP") {
-    fetch('https://api.ipify.org?format=json')
-      .then(response => response.json())
-      .then(data => {
-        chrome.storage.local.set({ realIP: data.ip });
-        sendResponse({ ip: data.ip });
-      })
-      .catch(error => {
-        sendResponse({ error: error.message });
-      });
-    return true;
-  }
+  return true; // Keep the message channel open for async response
 });

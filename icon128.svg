@@ -1,0 +1,42 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#9b59ff;stop-opacity:1" />
+      <stop offset="30%" style="stop-color:#8a4fff;stop-opacity:1" />
+      <stop offset="70%" style="stop-color:#7442c8;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#5d2fa3;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="4" dy="4" stdDeviation="4" flood-opacity="0.3"/>
+    </filter>
+    <radialGradient id="inner" cx="50%" cy="30%" r="50%">
+      <stop offset="0%" style="stop-color:white;stop-opacity:0.3" />
+      <stop offset="100%" style="stop-color:white;stop-opacity:0" />
+    </radialGradient>
+  </defs>
+  
+  <!-- Main circle with gradient -->
+  <circle cx="64" cy="64" r="60" fill="url(#grad1)" filter="url(#shadow)"/>
+  
+  <!-- Inner highlight -->
+  <circle cx="64" cy="64" r="60" fill="url(#inner)"/>
+  
+  <!-- Onion layers -->
+  <circle cx="64" cy="64" r="45" fill="none" stroke="white" stroke-width="3" opacity="0.9"/>
+  <circle cx="64" cy="64" r="32" fill="none" stroke="white" stroke-width="3" opacity="0.7"/>
+  <circle cx="64" cy="64" r="20" fill="none" stroke="white" stroke-width="2" opacity="0.5"/>
+  
+  <!-- Center core -->
+  <circle cx="64" cy="64" r="12" fill="white"/>
+  
+  <!-- Shield icon in center -->
+  <path d="M64 52 L56 56 L56 68 Q56 76 64 80 Q72 76 72 68 L72 56 Z" fill="#7442c8"/>
+  <path d="M64 56 L60 58 L60 68 Q60 72 64 74 Q68 72 68 68 L68 58 Z" fill="white"/>
+  
+  <!-- Connection dots around the circle -->
+  <circle cx="84" cy="44" r="3" fill="white" opacity="0.8"/>
+  <circle cx="108" cy="64" r="3" fill="white" opacity="0.8"/>
+  <circle cx="84" cy="84" r="3" fill="white" opacity="0.8"/>
+  <circle cx="44" cy="84" r="3" fill="white" opacity="0.8"/>
+  <circle cx="20" cy="64" r="3" fill="white" opacity="0.8"/>
+  <circle cx="44" cy="
