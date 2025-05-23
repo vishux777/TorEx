@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', function() {
   const securityAlert = document.getElementById('security-alert');
   
   let isConnecting = false;
+  let connectionCheckInterval = null;
   
   // Initialize UI
   init();
@@ -23,9 +24,24 @@ document.addEventListener('DOMContentLoaded', function() {
       await checkConnectionStatus();
       await loadSettings();
       await updateCurrentIP();
+      startConnectionMonitoring();
     } catch (error) {
       console.error("Initialization error:", error);
     }
+  }
+
+  // Start monitoring connection status
+  function startConnectionMonitoring() {
+    if (connectionCheckInterval) {
+      clearInterval(connectionCheckInterval);
+    }
+    
+    connectionCheckInterval = setInterval(() => {
+      if (!isConnecting) {
+        checkConnectionStatus();
+        updateCurrentIP();
+      }
+    }, 10000); // Check every 10 seconds
   }
 
   // Toggle settings visibility
@@ -46,6 +62,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Disable button and show loading state
     toggleButton.disabled = true;
     toggleButton.textContent = shouldConnect ? 'Connecting...' : 'Disconnecting...';
+    statusText.textContent = shouldConnect ? 'Establishing connection...' : 'Disconnecting...';
     
     try {
       const action = shouldConnect ? 'connect' : 'disconnect';
@@ -56,28 +73,33 @@ document.addEventListener('DOMContentLoaded', function() {
       if (response && response.success) {
         if (shouldConnect) {
           updateUIForConnectedState(response.ip);
+          showSuccessMessage("Connected successfully!");
         } else {
           updateUIForDisconnectedState();
+          showSuccessMessage("Disconnected successfully!");
         }
         // Refresh IP display after a short delay
-        setTimeout(updateCurrentIP, 2000);
+        setTimeout(updateCurrentIP, 1500);
       } else {
         // Handle error
         const errorMsg = response?.error || 'Operation failed';
         console.error("Connection error:", errorMsg);
         
         // Show error in status
-        statusText.textContent = 'Error: ' + (errorMsg.length > 30 ? errorMsg.substring(0, 30) + '...' : errorMsg);
+        statusText.textContent = 'Error: ' + (errorMsg.length > 40 ? errorMsg.substring(0, 40) + '...' : errorMsg);
         
         // If we were trying to connect, make sure UI shows disconnected state
         if (shouldConnect) {
           updateUIForDisconnectedState();
         }
+        
+        showErrorMessage(errorMsg);
       }
     } catch (error) {
       console.error("Connection operation failed:", error);
       statusText.textContent = 'Error: Connection failed';
       updateUIForDisconnectedState();
+      showErrorMessage("Connection failed. Please check your internet connection.");
     } finally {
       isConnecting = false;
       toggleButton.disabled = false;
@@ -130,7 +152,7 @@ document.addEventListener('DOMContentLoaded', function() {
           console.error("Runtime error:", chrome.runtime.lastError);
           resolve({ success: false, error: chrome.runtime.lastError.message });
         } else {
-          resolve(response);
+          resolve(response || { success: false, error: "No response received" });
         }
       });
     });
@@ -175,12 +197,17 @@ document.addEventListener('DOMContentLoaded', function() {
         currentIp.textContent = response.ip;
         
         // Check if we have a real IP to compare
-        const storageResult = await chrome.storage.local.get(['realIP']);
-        if (storageResult.realIP && storageResult.realIP !== response.ip) {
-          // IP is different, likely using proxy
-          securityLevel.textContent = enforceSecurityToggle.checked ? 'High' : 'Standard';
-        } else {
-          // Same IP, not using proxy
+        const storageResult = await chrome.storage.local.get(['realIP', 'connectionActive']);
+        if (storageResult.realIP && storageResult.connectionActive) {
+          if (storageResult.realIP !== response.ip) {
+            // IP is different, using proxy
+            securityLevel.textContent = enforceSecurityToggle.checked ? 'High' : 'Standard';
+          } else {
+            // Same IP, proxy might not be working
+            securityLevel.textContent = 'Warning: May not be protected';
+          }
+        } else if (!storageResult.connectionActive) {
+          // Not connected
           securityLevel.textContent = 'Not Protected';
         }
       } else {
@@ -269,11 +296,22 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
   
-  // Refresh status periodically
-  setInterval(() => {
-    if (!isConnecting) {
-      checkConnectionStatus();
-      updateCurrentIP();
+  // Show success message
+  function showSuccessMessage(message) {
+    console.log("Success:", message);
+    // You could add a toast notification here if desired
+  }
+  
+  // Show error message
+  function showErrorMessage(message) {
+    console.error("Error:", message);
+    // You could add a toast notification here if desired
+  }
+  
+  // Cleanup on popup close
+  window.addEventListener('beforeunload', () => {
+    if (connectionCheckInterval) {
+      clearInterval(connectionCheckInterval);
     }
-  }, 15000);
+  });
 });

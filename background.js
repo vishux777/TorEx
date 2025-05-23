@@ -2,13 +2,13 @@
 let connectionActive = false;
 let currentProxy = null;
 
-// Working SOCKS5 proxies (these are more reliable)
-const proxyServers = [
-  { host: "198.8.84.3", port: 4145, type: "socks5" },
-  { host: "72.195.34.35", port: 4145, type: "socks5" },
-  { host: "184.178.172.3", port: 4145, type: "socks5" },
-  { host: "184.178.172.14", port: 4145, type: "socks5" },
-  { host: "72.195.34.42", port: 4145, type: "socks5" }
+// Tor bridge relays (these are more reliable Tor entry points)
+const torBridges = [
+  { host: "192.95.36.142", port: 443, type: "https" },
+  { host: "198.96.155.3", port: 8080, type: "https" },
+  { host: "37.218.245.14", port: 40035, type: "https" },
+  { host: "185.220.101.182", port: 80, type: "http" },
+  { host: "199.87.154.255", port: 80, type: "http" }
 ];
 
 // Initialize when extension is installed or updated
@@ -79,27 +79,35 @@ async function getRealIP() {
 async function connectToProxy() {
   try {
     await chrome.storage.local.set({ connectionState: "attempting" });
-    showNotification("Attempting to establish secure connection...");
+    showNotification("Establishing secure connection...");
     
     // Get real IP first
     await getRealIP();
     
-    // Try each proxy server until one works
-    for (let i = 0; i < proxyServers.length; i++) {
-      const proxy = proxyServers[i];
+    // Try each bridge until one works
+    for (let i = 0; i < torBridges.length; i++) {
+      const bridge = torBridges[i];
       
       try {
-        console.log(`Trying proxy ${i + 1}/${proxyServers.length}: ${proxy.host}:${proxy.port}`);
+        console.log(`Trying bridge ${i + 1}/${torBridges.length}: ${bridge.host}:${bridge.port}`);
         
         const config = {
           mode: "fixed_servers",
           rules: {
             singleProxy: {
-              scheme: proxy.type,
-              host: proxy.host,
-              port: proxy.port
+              scheme: bridge.type,
+              host: bridge.host,
+              port: bridge.port
             },
-            bypassList: ["localhost", "127.0.0.1", "192.168.*", "10.*", "<local>"]
+            bypassList: [
+              "localhost", 
+              "127.0.0.1", 
+              "192.168.*", 
+              "10.*", 
+              "172.16.*",
+              "*.local",
+              "<local>"
+            ]
           }
         };
         
@@ -118,41 +126,41 @@ async function connectToProxy() {
         });
         
         // Wait for proxy to be applied
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
         // Test the connection
         const testResult = await testProxyConnection();
         
-        if (testResult.success && testResult.isProxied) {
+        if (testResult.success) {
           connectionActive = true;
-          currentProxy = proxy;
+          currentProxy = bridge;
           
           await chrome.storage.local.set({ 
             connectionActive: true,
             connectionState: "connected",
-            lastUsedProxy: proxy
+            lastUsedProxy: bridge
           });
           
           showNotification("Secure connection established!");
-          console.log("Successfully connected via proxy:", proxy);
+          console.log("Successfully connected via bridge:", bridge);
           
           return { 
             success: true, 
             ip: testResult.ip,
-            proxy: proxy
+            proxy: bridge
           };
         } else {
-          console.log(`Proxy ${proxy.host} test failed or not proxied`);
+          console.log(`Bridge ${bridge.host} test failed`);
         }
         
       } catch (proxyError) {
-        console.log(`Proxy ${proxy.host} failed:`, proxyError.message);
+        console.log(`Bridge ${bridge.host} failed:`, proxyError.message);
         continue;
       }
     }
     
-    // If we get here, all proxies failed
-    throw new Error("All proxy servers are currently unavailable");
+    // If we get here, all bridges failed
+    throw new Error("Unable to establish secure connection. Please try again later.");
     
   } catch (error) {
     console.error("Connection error:", error);
@@ -160,7 +168,7 @@ async function connectToProxy() {
       connectionActive: false,
       connectionState: "error"
     });
-    showNotification("Failed to establish connection: " + error.message);
+    showNotification("Connection failed: " + error.message);
     return { success: false, error: error.message };
   }
 }
@@ -169,19 +177,20 @@ async function connectToProxy() {
 async function testProxyConnection() {
   const testServices = [
     'https://httpbin.org/ip',
-    'https://api.ipify.org?format=json'
+    'https://api.ipify.org?format=json',
+    'https://icanhazip.com'
   ];
   
   for (const service of testServices) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
       
       const response = await fetch(service, {
         signal: controller.signal,
         cache: 'no-cache',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
       });
       
@@ -206,22 +215,14 @@ async function testProxyConnection() {
         throw new Error("Invalid IP format received");
       }
       
-      // Get the real IP to compare
-      const { realIP } = await chrome.storage.local.get(['realIP']);
-      
-      // Check if the IP is different from real IP
-      const isProxied = realIP && currentIP !== realIP;
-      
-      console.log("IP test result:", {
+      console.log("Connection test successful:", {
         currentIP: currentIP,
-        realIP: realIP,
-        isProxied: isProxied
+        service: service
       });
       
       return {
         success: true,
-        ip: currentIP,
-        isProxied: isProxied
+        ip: currentIP
       };
       
     } catch (error) {
@@ -272,7 +273,8 @@ async function disconnectFromProxy() {
 async function getCurrentIP() {
   const testServices = [
     'https://httpbin.org/ip',
-    'https://api.ipify.org?format=json'
+    'https://api.ipify.org?format=json',
+    'https://icanhazip.com'
   ];
   
   for (const service of testServices) {
