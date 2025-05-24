@@ -1,5 +1,4 @@
 document.addEventListener('DOMContentLoaded', function() {
-  // Get UI elements
   const toggleButton = document.getElementById('toggle-connection');
   const statusDot = document.getElementById('status-dot');
   const statusText = document.getElementById('status-text');
@@ -12,306 +11,336 @@ document.addEventListener('DOMContentLoaded', function() {
   const circuitRefreshSelect = document.getElementById('circuit-refresh');
   const saveSettingsButton = document.getElementById('save-settings');
   const securityAlert = document.getElementById('security-alert');
-  
-  let isConnecting = false;
+
+  let UILock = false;
   let connectionCheckInterval = null;
-  
-  // Initialize UI
-  init();
-  
+  let lastKnownState = null;
+
   async function init() {
     try {
-      await checkConnectionStatus();
       await loadSettings();
-      await updateCurrentIP();
+      await updateFullUIState();
       startConnectionMonitoring();
     } catch (error) {
       console.error("Initialization error:", error);
+      setUIError("Initialization failed");
     }
   }
 
-  // Start monitoring connection status
   function startConnectionMonitoring() {
     if (connectionCheckInterval) {
       clearInterval(connectionCheckInterval);
     }
     
-    connectionCheckInterval = setInterval(() => {
-      if (!isConnecting) {
-        checkConnectionStatus();
-        updateCurrentIP();
+    connectionCheckInterval = setInterval(async () => {
+      if (!UILock) {
+        await updateFullUIState();
       }
-    }, 10000); // Check every 10 seconds
+    }, 5000); // Check every 5 seconds
   }
 
-  // Toggle settings visibility
-  toggleSettingsBtn.addEventListener('click', function() {
+  toggleSettingsBtn.addEventListener('click', () => {
     settingsContent.classList.toggle('hidden');
   });
-  
-  // Setup connection toggle button
+
   toggleButton.addEventListener('click', async function() {
+    if (UILock) return;
+    
+    UILock = true;
+    const isConnecting = toggleButton.textContent === 'Connect';
+    const action = isConnecting ? 'connect' : 'disconnect';
+    
+    // Update UI immediately
     if (isConnecting) {
-      console.log("Already connecting, ignoring click");
-      return;
+      setUIAttempting();
+    } else {
+      setUIDisconnecting();
     }
-    
-    const shouldConnect = toggleButton.textContent === 'Connect';
-    isConnecting = true;
-    
-    // Disable button and show loading state
-    toggleButton.disabled = true;
-    toggleButton.textContent = shouldConnect ? 'Connecting...' : 'Disconnecting...';
-    statusText.textContent = shouldConnect ? 'Establishing connection...' : 'Disconnecting...';
-    
+
     try {
-      const action = shouldConnect ? 'connect' : 'disconnect';
-      
       const response = await sendMessage({ action: action });
-      console.log("Connection response:", response);
       
-      if (response && response.success) {
-        if (shouldConnect) {
-          updateUIForConnectedState(response.ip);
-          showSuccessMessage("Connected successfully!");
-        } else {
-          updateUIForDisconnectedState();
-          showSuccessMessage("Disconnected successfully!");
-        }
-        // Refresh IP display after a short delay
-        setTimeout(updateCurrentIP, 1500);
-      } else {
-        // Handle error
-        const errorMsg = response?.error || 'Operation failed';
-        console.error("Connection error:", errorMsg);
-        
-        // Show error in status
-        statusText.textContent = 'Error: ' + (errorMsg.length > 40 ? errorMsg.substring(0, 40) + '...' : errorMsg);
-        
-        // If we were trying to connect, make sure UI shows disconnected state
-        if (shouldConnect) {
-          updateUIForDisconnectedState();
-        }
-        
-        showErrorMessage(errorMsg);
+      if (!response) {
+        throw new Error("No response from background script");
       }
+      
+      if (!response.success) {
+        throw new Error(response.error || `${action} operation failed`);
+      }
+      
+      // Success - let updateFullUIState handle the UI update
+      await updateFullUIState();
+      
     } catch (error) {
-      console.error("Connection operation failed:", error);
-      statusText.textContent = 'Error: Connection failed';
-      updateUIForDisconnectedState();
-      showErrorMessage("Connection failed. Please check your internet connection.");
+      console.error(`Toggle connection error (${action}):`, error);
+      // Show error state briefly, then check actual status
+      setUIError(`${action} failed: ${error.message}`);
+      setTimeout(async () => {
+        await updateFullUIState();
+      }, 2000);
     } finally {
-      isConnecting = false;
-      toggleButton.disabled = false;
+      UILock = false;
     }
   });
-  
-  // Save settings
+
   saveSettingsButton.addEventListener('click', async function() {
+    if (UILock) return;
+    
+    const originalText = saveSettingsButton.textContent;
+    saveSettingsButton.disabled = true;
+    saveSettingsButton.textContent = 'Saving...';
+
     const settings = {
       autoConnect: autoConnectToggle.checked,
       enforceSecurity: enforceSecurityToggle.checked,
       circuitRefresh: parseInt(circuitRefreshSelect.value)
     };
-    
-    saveSettingsButton.textContent = 'Saving...';
-    saveSettingsButton.disabled = true;
-    
+
     try {
       const response = await sendMessage({ 
-        action: 'updateSettings',
-        settings: settings
+        action: 'updateSettings', 
+        settings: settings 
       });
       
       if (response && response.success) {
         saveSettingsButton.textContent = 'Saved!';
-        setTimeout(() => {
-          saveSettingsButton.textContent = 'Save Settings';
-        }, 1500);
-        
         updateSecurityWarning(settings.enforceSecurity);
+        
+        // Update security level if connected
+        const statusResponse = await sendMessage({ action: 'getStatus' });
+        if (statusResponse?.success && statusResponse.connectionActive) {
+          securityLevel.textContent = settings.enforceSecurity ? 'High' : 'Standard';
+        }
       } else {
         throw new Error(response?.error || 'Save failed');
       }
     } catch (error) {
       console.error("Settings save error:", error);
-      saveSettingsButton.textContent = 'Error - Try Again';
-      setTimeout(() => {
-        saveSettingsButton.textContent = 'Save Settings';
-      }, 1500);
+      saveSettingsButton.textContent = 'Error!';
     } finally {
-      saveSettingsButton.disabled = false;
+      setTimeout(() => {
+        saveSettingsButton.textContent = originalText;
+        saveSettingsButton.disabled = false;
+      }, 1500);
     }
   });
-  
-  // Helper function to send messages to background script
+
   function sendMessage(message) {
     return new Promise((resolve) => {
       chrome.runtime.sendMessage(message, (response) => {
         if (chrome.runtime.lastError) {
-          console.error("Runtime error:", chrome.runtime.lastError);
-          resolve({ success: false, error: chrome.runtime.lastError.message });
+          console.error("Runtime error:", chrome.runtime.lastError.message);
+          resolve({ 
+            success: false, 
+            error: `Runtime: ${chrome.runtime.lastError.message}` 
+          });
+        } else if (response === undefined) {
+          console.error("No response for message:", message);
+          resolve({ 
+            success: false, 
+            error: "No response from background script" 
+          });
         } else {
-          resolve(response || { success: false, error: "No response received" });
+          resolve(response);
         }
       });
     });
   }
-  
-  // Function to check current connection status
-  async function checkConnectionStatus() {
+
+  async function updateFullUIState() {
     try {
-      const response = await sendMessage({ action: 'getStatus' });
-      console.log("Status response:", response);
+      const statusResponse = await sendMessage({ action: 'getStatus' });
       
-      if (response && response.connectionActive) {
-        updateUIForConnectedState();
-        
-        // Handle different connection states
-        switch (response.connectionState) {
-          case "attempting":
-            statusText.textContent = 'Connecting...';
-            currentIp.textContent = 'Establishing connection...';
-            break;
-          case "connected":
-            statusText.textContent = 'Connected';
-            break;
-          default:
-            statusText.textContent = 'Connected';
-        }
-      } else {
-        updateUIForDisconnectedState();
+      if (!statusResponse || !statusResponse.success) {
+        setUIError("Cannot get status");
+        return;
       }
-    } catch (error) {
-      console.error("Status check error:", error);
-      updateUIForDisconnectedState();
-    }
-  }
-  
-  // Function to update current IP display
-  async function updateCurrentIP() {
-    try {
-      const response = await sendMessage({ action: 'checkIP' });
+
+      const { connectionState, connectionActive, realIP, lastUsedProxy } = statusResponse;
       
-      if (response && response.success && response.ip) {
-        currentIp.textContent = response.ip;
-        
-        // Check if we have a real IP to compare
-        const storageResult = await chrome.storage.local.get(['realIP', 'connectionActive']);
-        if (storageResult.realIP && storageResult.connectionActive) {
-          if (storageResult.realIP !== response.ip) {
-            // IP is different, using proxy
-            securityLevel.textContent = enforceSecurityToggle.checked ? 'High' : 'Standard';
+      // Avoid unnecessary UI updates
+      const currentState = `${connectionState}-${connectionActive}`;
+      if (lastKnownState === currentState) {
+        return;
+      }
+      lastKnownState = currentState;
+
+      switch (connectionState) {
+        case "connected":
+          if (connectionActive) {
+            await handleConnectedState(lastUsedProxy);
           } else {
-            // Same IP, proxy might not be working
-            securityLevel.textContent = 'Warning: May not be protected';
+            // Inconsistent state - should not happen
+            setUIError("State inconsistency");
           }
-        } else if (!storageResult.connectionActive) {
-          // Not connected
-          securityLevel.textContent = 'Not Protected';
-        }
-      } else {
-        currentIp.textContent = 'Unable to check';
-        console.error("IP check failed:", response?.error);
+          break;
+          
+        case "attempting":
+          setUIAttempting();
+          currentIp.textContent = 'Establishing connection...';
+          securityLevel.textContent = 'Connecting...';
+          break;
+          
+        case "disconnected":
+          await handleDisconnectedState(realIP);
+          break;
+          
+        case "error":
+          setUIError("Connection error");
+          currentIp.textContent = realIP || 'Error getting IP';
+          securityLevel.textContent = 'Error';
+          break;
+          
+        default:
+          setUIError("Unknown state");
+          currentIp.textContent = realIP || 'Unknown';
+          securityLevel.textContent = 'Unknown';
       }
+      
     } catch (error) {
-      console.error("IP update error:", error);
-      currentIp.textContent = 'Check failed';
+      console.error("Error updating UI state:", error);
+      setUIError("UI update failed");
     }
   }
-  
-  // Function to load saved settings
+
+  async function handleConnectedState(proxyInfo) {
+    setUIConnected();
+    
+    try {
+      // Get current IP through proxy
+      const ipResponse = await sendMessage({ action: 'checkIP' });
+      
+      if (ipResponse && ipResponse.success && ipResponse.ip) {
+        currentIp.textContent = ipResponse.ip;
+        
+        // Check if it's actually different from real IP
+        const realIPResponse = await sendMessage({ action: 'checkRealIP' });
+        if (realIPResponse?.success && realIPResponse.ip) {
+          if (ipResponse.ip === realIPResponse.ip) {
+            securityLevel.textContent = 'WARNING: IP Unchanged!';
+            securityLevel.style.backgroundColor = 'var(--danger)';
+          } else {
+            securityLevel.textContent = enforceSecurityToggle.checked ? 'High' : 'Standard';
+            securityLevel.style.backgroundColor = 'var(--primary-dark)';
+          }
+        } else {
+          securityLevel.textContent = enforceSecurityToggle.checked ? 'High' : 'Standard';
+          securityLevel.style.backgroundColor = 'var(--primary-dark)';
+        }
+      } else {
+        currentIp.textContent = 'Connected (IP check failed)';
+        securityLevel.textContent = 'Connected';
+      }
+    } catch (error) {
+      console.error("Error checking connected state:", error);
+      currentIp.textContent = 'Connected (verification failed)';
+      securityLevel.textContent = 'Connected';
+    }
+  }
+
+  async function handleDisconnectedState(realIP) {
+    setUIDisconnected();
+    securityLevel.textContent = 'Not Protected';
+    securityLevel.style.backgroundColor = 'var(--surface)';
+    
+    if (realIP) {
+      currentIp.textContent = realIP;
+    } else {
+      currentIp.textContent = 'Checking...';
+      try {
+        const realIPResponse = await sendMessage({ action: 'checkRealIP' });
+        if (realIPResponse?.success && realIPResponse.ip) {
+          currentIp.textContent = realIPResponse.ip;
+        } else {
+          currentIp.textContent = 'IP check failed';
+        }
+      } catch (error) {
+        currentIp.textContent = 'IP check error';
+      }
+    }
+  }
+
+  function setUIConnected() {
+    statusDot.classList.add('connected');
+    statusText.textContent = 'Connected';
+    toggleButton.textContent = 'Disconnect';
+    toggleButton.classList.add('disconnect');
+    toggleButton.disabled = false;
+  }
+
+  function setUIDisconnected() {
+    statusDot.classList.remove('connected');
+    statusText.textContent = 'Disconnected';
+    toggleButton.textContent = 'Connect';
+    toggleButton.classList.remove('disconnect');
+    toggleButton.disabled = false;
+  }
+
+  function setUIAttempting() {
+    statusDot.classList.remove('connected');
+    statusText.textContent = 'Connecting...';
+    toggleButton.textContent = 'Connecting...';
+    toggleButton.classList.remove('disconnect');
+    toggleButton.disabled = true;
+  }
+
+  function setUIDisconnecting() {
+    statusDot.classList.remove('connected');
+    statusText.textContent = 'Disconnecting...';
+    toggleButton.textContent = 'Disconnecting...';
+    toggleButton.classList.remove('disconnect');
+    toggleButton.disabled = true;
+  }
+
+  function setUIError(message) {
+    statusDot.classList.remove('connected');
+    statusText.textContent = message;
+    toggleButton.textContent = 'Retry';
+    toggleButton.classList.remove('disconnect');
+    toggleButton.disabled = false;
+  }
+
   async function loadSettings() {
     try {
-      const result = await chrome.storage.local.get(['autoConnect', 'enforceSecurity', 'circuitRefresh']);
+      const result = await chrome.storage.local.get([
+        'autoConnect', 
+        'enforceSecurity', 
+        'circuitRefresh'
+      ]);
       
       autoConnectToggle.checked = result.autoConnect || false;
-      enforceSecurityToggle.checked = result.enforceSecurity !== undefined ? result.enforceSecurity : true;
-      
-      if (result.circuitRefresh) {
-        circuitRefreshSelect.value = result.circuitRefresh.toString();
-      }
+      enforceSecurityToggle.checked = result.enforceSecurity !== undefined ? 
+        result.enforceSecurity : true;
+      circuitRefreshSelect.value = result.circuitRefresh ? 
+        result.circuitRefresh.toString() : "0";
       
       updateSecurityWarning(enforceSecurityToggle.checked);
     } catch (error) {
       console.error("Settings load error:", error);
     }
   }
-  
-  // Function to update UI for connected state
-  function updateUIForConnectedState(ip) {
-    statusDot.classList.add('connected');
-    statusText.textContent = 'Connected';
-    toggleButton.textContent = 'Disconnect';
-    toggleButton.classList.add('disconnect');
-    
-    if (ip) {
-      currentIp.textContent = ip;
-    }
-    
-    securityLevel.textContent = enforceSecurityToggle.checked ? 'High' : 'Standard';
-  }
-  
-  // Function to update UI for disconnected state
-  async function updateUIForDisconnectedState() {
-    statusDot.classList.remove('connected');
-    statusText.textContent = 'Disconnected';
-    toggleButton.textContent = 'Connect';
-    toggleButton.classList.remove('disconnect');
-    securityLevel.textContent = 'Not Protected';
-    
-    try {
-      // Show real IP when disconnected
-      const result = await chrome.storage.local.get(['realIP']);
-      if (result.realIP) {
-        currentIp.textContent = result.realIP;
-      } else {
-        currentIp.textContent = 'Checking...';
-        // Get real IP if not stored
-        const response = await sendMessage({ action: 'checkRealIP' });
-        if (response && response.ip) {
-          currentIp.textContent = response.ip;
-        } else {
-          currentIp.textContent = 'Unknown';
-        }
-      }
-    } catch (error) {
-      console.error("Error updating disconnected state:", error);
-      currentIp.textContent = 'Unknown';
-    }
-  }
-  
-  // Function to update security warning message
+
   function updateSecurityWarning(enforceSecurityEnabled) {
     const alertMessage = securityAlert.querySelector('.alert-message');
     
     if (enforceSecurityEnabled) {
-      alertMessage.textContent = 'Enhanced security active. Avoid logging into personal accounts.';
+      alertMessage.textContent = 'Enhanced security active. Privacy features enforced on all tabs.';
       securityAlert.style.backgroundColor = 'rgba(76, 175, 80, 0.15)';
-      securityAlert.style.borderColor = '#4caf50';
+      securityAlert.style.borderLeftColor = 'var(--success)';
     } else {
       alertMessage.textContent = 'WARNING: Enhanced security disabled. Browser may leak information.';
       securityAlert.style.backgroundColor = 'rgba(229, 57, 53, 0.15)';
-      securityAlert.style.borderColor = '#e53935';
+      securityAlert.style.borderLeftColor = 'var(--danger)';
     }
   }
-  
-  // Show success message
-  function showSuccessMessage(message) {
-    console.log("Success:", message);
-    // You could add a toast notification here if desired
-  }
-  
-  // Show error message
-  function showErrorMessage(message) {
-    console.error("Error:", message);
-    // You could add a toast notification here if desired
-  }
-  
+
   // Cleanup on popup close
   window.addEventListener('beforeunload', () => {
     if (connectionCheckInterval) {
       clearInterval(connectionCheckInterval);
     }
   });
+
+  // Initialize the popup
+  init();
 });

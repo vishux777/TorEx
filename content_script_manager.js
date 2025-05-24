@@ -1,88 +1,133 @@
-// Content script manager
-// This script manages when the security enforcement scripts are injected
+// Content script manager - Enhanced version
+let scriptInjectionInProgress = false;
 
-// Function to inject or remove security scripts based on settings
 async function updateSecurityScripts() {
+  if (scriptInjectionInProgress) {
+    return;
+  }
+
   try {
-    // Get current settings
-    const { connectionActive, enforceSecurity } = 
+    scriptInjectionInProgress = true;
+    const { connectionActive, enforceSecurity } =
       await chrome.storage.local.get(['connectionActive', 'enforceSecurity']);
     
-    // Get all tabs
     const tabs = await chrome.tabs.query({});
-    
-    // Check if security scripts should be enabled
+    console.log(`Security script update: connectionActive=${connectionActive}, enforceSecurity=${enforceSecurity}`);
+
     if (connectionActive && enforceSecurity) {
-      console.log("Enabling security scripts on all tabs");
+      console.log("Enabling security scripts on all applicable tabs");
+      let injectedCount = 0;
       
-      // Inject the security scripts into all tabs
       for (const tab of tabs) {
-        // Skip extension pages and restricted URLs
-        if (tab.url.startsWith('chrome://') || 
+        if (!tab.id || !tab.url || 
+            tab.url.startsWith('chrome://') ||
             tab.url.startsWith('chrome-extension://') ||
-            tab.url.startsWith('edge://') ||
-            tab.url.startsWith('about:')) {
+            tab.url.startsWith('edge://') || 
+            tab.url.startsWith('moz-extension://') ||
+            tab.url.startsWith('about:') ||
+            tab.url.startsWith('file://')) {
           continue;
         }
-        
+
         try {
-          // Check if script already injected
+          // Check if script is already active
           const existingScripts = await chrome.scripting.executeScript({
             target: { tabId: tab.id },
-            func: () => window._secureTorBridgeActive || false
+            func: () => {
+              try {
+                return window._secureTorBridgeContentScriptActive || false;
+              } catch (e) {
+                return false;
+              }
+            }
           });
           
-          // Only inject if not already active
           const isActive = existingScripts?.[0]?.result;
+          
           if (!isActive) {
             await chrome.scripting.executeScript({
               target: { tabId: tab.id },
               files: ['enforce_security.js']
             });
-            
-            // Mark the tab as having security scripts
-            await chrome.scripting.executeScript({
-              target: { tabId: tab.id },
-              func: () => { window._secureTorBridgeActive = true; }
-            });
+            injectedCount++;
+            console.log(`Injected security script into tab ${tab.id} (${new URL(tab.url).hostname})`);
           }
         } catch (tabError) {
-          console.log(`Could not inject into tab ${tab.id}: ${tabError.message}`);
-          // Some tabs don't allow content script injection, which is fine
+          // Silently ignore tabs that can't be accessed
+          if (tabError.message.includes('Cannot access')) {
+            continue;
+          }
+          console.log(`Could not inject into tab ${tab.id} (${tab.url}): ${tabError.message}`);
         }
       }
-    } else {
-      console.log("Security scripts disabled or connection inactive");
       
-      // We could remove the scripts here, but that would require a page reload
-      // Instead, we'll just note that they are inactive for next time
+      if (injectedCount > 0) {
+        console.log(`Security scripts injected into ${injectedCount} tabs`);
+      }
+    } else {
+      console.log("Security enforcement disabled or not connected");
     }
   } catch (error) {
     console.error("Error managing security scripts:", error);
+  } finally {
+    scriptInjectionInProgress = false;
   }
 }
 
-// Listen for connection status changes
 chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace === 'local') {
-    if (changes.connectionActive || changes.enforceSecurity) {
-      console.log("Connection or security settings changed, updating scripts");
-      updateSecurityScripts();
-    }
+  if (namespace === 'local' && (changes.connectionActive || changes.enforceSecurity)) {
+    console.log("Storage changed, updating security scripts");
+    setTimeout(updateSecurityScripts, 500); // Small delay to avoid rapid updates
   }
 });
 
-// Listen for new tabs being created
-chrome.tabs.onCreated.addListener(() => {
-  updateSecurityScripts();
-});
-
-// Listen for tab updates (e.g., navigation to new URL)
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete') {
-    updateSecurityScripts();
+  if (changeInfo.status === 'complete' && tab.url && !tab.url.startsWith('chrome')) {
+    // Only update for the specific tab that completed loading
+    setTimeout(async () => {
+      const { connectionActive, enforceSecurity } = 
+        await chrome.storage.local.get(['connectionActive', 'enforceSecurity']);
+      
+      if (connectionActive && enforceSecurity) {
+        try {
+          const existingScripts = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => {
+              try {
+                return window._secureTorBridgeContentScriptActive || false;
+              } catch (e) {
+                return false;
+              }
+            }
+          });
+          
+          const isActive = existingScripts?.[0]?.result;
+          
+          if (!isActive) {
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              files: ['enforce_security.js']
+            });
+            console.log(`Security script injected into newly loaded tab ${tab.id}`);
+          }
+        } catch (error) {
+          // Ignore injection errors for restricted pages
+        }
+      }
+    }, 1000);
   }
 });
 
-// Initialize when this script loads
-updateSecurityScripts();
+chrome.tabs.onCreated.addListener((tab) => {
+  // Wait for the tab to load before attempting injection
+  setTimeout(updateSecurityScripts, 2000);
+});
+
+// Enhanced initialization
+chrome.runtime.onStartup.addListener(() => {
+  console.log("Browser startup - initializing security script manager");
+  setTimeout(updateSecurityScripts, 3000);
+});
+
+// Initial run when the service worker starts
+setTimeout(updateSecurityScripts, 1000);

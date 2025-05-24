@@ -1,35 +1,62 @@
 {
   "manifest_version": 3,
   "name": "SecureTor Bridge",
-  "version": "2.0.1",
-  "description": "Secure proxy connection with enhanced privacy features",
+  "version": "2.1.0",
+  "description": "Secure proxy connection with enhanced privacy features and Tor network access",
   "permissions": [
     "proxy",
     "storage",
     "notifications",
     "tabs",
     "scripting",
-    "webRequest"
+    "webRequest",
+    "webRequestBlocking",
+    "alarms",
+    "activeTab",
+    "background"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
+    "*://*/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content_script_manager.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "SecureTor Bridge"
+    "default_title": "SecureTor Bridge - Secure Anonymous Browsing",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon48.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
   },
   "icons": {
     "16": "icon16.png",
+    "32": "icon48.png",
     "48": "icon48.png",
     "128": "icon128.png"
   },
   "web_accessible_resources": [
     {
-      "resources": ["enforce_security.js"],
+      "resources": [
+        "enforce_security.js",
+        "*.png",
+        "*.svg"
+      ],
       "matches": ["<all_urls>"]
     }
-  ]
+  ],
+  "minimum_chrome_version": "88",
+  "offline_enabled": false
 }
