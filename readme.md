@@ -6,7 +6,7 @@
 
 ## Why This Project Cannot Deliver Real Tor Anonymity
 
-After careful analysis, we've determined that this extension has critical flaws that make real Tor integration impossible:
+After careful analysis, i've determined that this extension has critical flaws that make real Tor integration impossible:
 
 ### 1. **Browser Extensions Can't Do Tor Properly**
 - Tor requires complex cryptographic circuits through multiple relays with onion routing
